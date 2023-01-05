@@ -3,7 +3,7 @@ from machine import Timer
 from lib_pico.async_push_button import Button
 from lib_pico.ST7735_GUI import *
 
-from pulse_utility.pulses import Probe
+from debug_utility.pulses import Probe
 probe_gpio = 16
 probe = Probe(probe_gpio)
 
@@ -180,15 +180,16 @@ class DCF_Decoder():
         self._BCD_weight = [1, 2, 4, 8, 10, 20, 40, 80]
    
     def _push(self, data):
-        probe.pulse_single(100)
         self._current_string += data
+#         probe.pulse_single(100)
+#         print(f"[{len(self._current_string)-1:2d}]={data:1s}\tt={self._DCF_signal_duration:3d}\t{self._current_string}")
         if data == "#" :
             self._frame = self._current_string
-            self._current_string = ""
-        
+            self._current_string = "" 
             
     def _frame_completed(self):
-        return len(self._frame)==59
+        print(f"frame length:{len(self._frame)}")
+        return len(self._frame)==60
     
     def _DCF_clock_IRQ_handler(self, button):
         irq_state = machine.disable_irq()
@@ -204,10 +205,13 @@ class DCF_Decoder():
         return value
     
     def _frame_is_valid(self):
-        p1=self._frame[21:29].count("1")%2 == 0
-        p2=self._frame[29:36].count("1")%2 == 0
-        p3=self._frame[36:59].count("1")%2 == 0
-        return (p1 and p2 and p3)
+        s0 = (self._frame[0]  == "0")
+        s1 = (self._frame[20] == "1")
+        p1 = (self._frame[21:29].count("1")%2 == 0)
+        p2 = (self._frame[29:36].count("1")%2 == 0)
+        p3 = (self._frame[36:59].count("1")%2 == 0)
+#         print(f"s0:{s0}\ts1:{s1}\tp1:{p1}\tp2:{p2}\tp3:{p3}")
+        return (s0 and s1 and p1 and p2 and p3)
     
     async def time_decoder(self):       
         while True:
@@ -221,6 +225,8 @@ class DCF_Decoder():
                     elif self._DCF_signal_duration >= 850 and self._DCF_signal_duration < 950 :
                         self._push("0")
                     elif self._DCF_signal_duration >= 1750 and self._DCF_signal_duration < 1950 :
+                        if self._DCF_signal_duration < 1850 : self._push("1")
+                        else : self._push("0")
                         self._push("#")
                         self._time.start_new_minute()
                         self._status_controller.EoF_received()
