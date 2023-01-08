@@ -5,7 +5,7 @@ The project uses lib_pico and debug_utility from https://github.com/xiansnn/RP2-
 
 In this version, the radio signal is received via a WebSDR (http://www.websdr.org/) and in particular the one from University of Twente in Enshede The Netherland (http://websdr.ewi.utwente.nl:8901/).
 
-This is not the best way to decode DCF77, using a true radio receiver is the best option. But this is a side project, derived from the morse décoder, for which, I wanted to expérimentation audio capture.
+This is not the best way to decode DCF77, using a true radio receiver is the best option. But this is a side project, derived from the morse decoder project (https://github.com/xiansnn/Morse-decoder.git), for which, I wanted to expérimentation audio capture.
 
 As a result, there is no direct reception of the radio siganl. The radio signal is converted in audio signal by the WebSDR, then the audio signal is captured by a microphone (HW-484 or KY-038) and processed by a special circuitry to get a logical 3.3V level synchronized with the radio signal.
 
