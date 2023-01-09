@@ -1,4 +1,4 @@
-import uasyncio, ustruct
+import uasyncio, ustruct, time
 from machine import Timer
 from lib_pico.async_push_button import Button
 from lib_pico.ST7735_GUI import *
@@ -115,8 +115,6 @@ The local clock/calendar, triggered by 1-second local timer
 """
     def __init__(self, display):
         self._display = display
-        Timer().init(mode=Timer.PERIODIC, period=1000, callback=self._local_clock_IRQ_handler)
-        self._local_clock_elapsed = uasyncio.ThreadSafeFlag()
         self.year = 0
         self.month = "xxx"
         self._month_values = ["xxx","JAN","FEV","MAR","AVR","MAI","JUN","JUL","AOU","SEP","OCT","NOV","DEC"]
@@ -128,11 +126,9 @@ The local clock/calendar, triggered by 1-second local timer
         self.seconds = 0
         self.time_zone = "xxx" #CET = +1, CEST = +2
         self._time_zone_values = ["GMT","CEST","CET"]
+        self._last_time = 0
+        self._current_delay = 1000
 
-    def _local_clock_IRQ_handler(self, time):
-        irq_state = machine.disable_irq()
-        self._local_clock_elapsed.set()
-        machine.enable_irq(irq_state)
     
     def update_time(self, time_pack):
         """
@@ -172,8 +168,12 @@ method used when a "next minute" signal is received
 coroutine triggered by the 1-second local timer
 """
         while True:
-            await self._local_clock_elapsed.wait()
-            self._local_clock_elapsed.clear()
+            current_time = time.ticks_ms()
+            current_period = max(900,min(current_time - self._last_time,1100)) # we keep only the value between 900 and 1100 ms
+            self._last_time = current_time
+            delta = 1000 - current_period # we compute the error on the true current period
+            self._current_delay = self._current_delay + int(delta/5)
+            await uasyncio.sleep_ms(self._current_delay) # this will avoid to use internal timer IRQ
             probe.pulse_single() # for debugging purpose
             if self.seconds==59:
                 self.seconds = 0
@@ -207,7 +207,7 @@ the DCF decoder algorithm, triggered by the DCF radio signal after being process
     def _push(self, data):
         self._current_string += data
 #         probe.pulse_single(100)
-#         print(f"[{len(self._current_string)-1:2d}]={data:1s}\tt={self._DCF_signal_duration:3d}\t{self._current_string}")
+#         print(f"[{len(self._current_string)-1:2d}]={data:1s}\t{self._current_string}")
         if data == "#" :
             self._frame = self._current_string
             self._current_string = "" 
