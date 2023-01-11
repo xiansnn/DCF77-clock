@@ -115,9 +115,9 @@ class LocalTimeCalendar():
 The local clock/calendar, triggered by 1-second local timer
 """
     def __init__(self, display):
-        G = 1 # proportional gain of the PID corrector
-        Ti = 3000 # integration time constant of the PID corrector
-        Td = 100 # derivative time constant of the PID corrector
+        G = .5 # proportional gain of the PID corrector
+        Ti = 2500 # integration time constant of the PID corrector
+        Td = 10 # derivative time constant of the PID corrector
         Ts = 1000 # sampling time 
 
         self._display = display
@@ -138,7 +138,7 @@ The local clock/calendar, triggered by 1-second local timer
         self._current_delay = 1000
         self._last_delay = 1000
         self.A0 = G + Ts/Ti + Td/Ts
-        self.A1 = - 2*Td/Ts
+        self.A1 = - (G + 2*Td/Ts)
         self.A2 = Td/Ts
 #         print(self.A0, self.A1, self.A2)
         
