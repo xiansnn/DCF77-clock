@@ -2,7 +2,8 @@ import uasyncio, ustruct, time
 from machine import Timer
 from lib_pico.async_push_button import Button
 from lib_pico.ST7735_GUI import *
-from lib_pico.means import FIFO
+# from lib_pico.means import FIFO
+from lib_pico.filter import PID, clamp
 
 from debug_utility.pulses import Probe
 probe_gpio = 16
@@ -115,10 +116,11 @@ class LocalTimeCalendar():
 The local clock/calendar, triggered by 1-second local timer
 """
     def __init__(self, display):
-        G = .5 # proportional gain of the PID corrector
-        Ti = 2500 # integration time constant of the PID corrector
-        Td = 10 # derivative time constant of the PID corrector
-        Ts = 1000 # sampling time 
+        # G proportional gain of the PID corrector
+        # Ti integration time constant of the PID corrector
+        # Td derivative time constant of the PID corrector
+        # Ts sampling time      
+        self.pid=PID( Ts=1000, G=.3 , Ti=2500 , Td=0) # values determined experimentally
 
         self._display = display
         self.year = 0
@@ -134,13 +136,8 @@ The local clock/calendar, triggered by 1-second local timer
         self._time_zone_values = ["GMT","CEST","CET"]
         # variables for the PID corrector in next_second coroutine
         self._last_time = 0
-        self._delta = FIFO(3)
-        self._current_delay = 1000
-        self._last_delay = 1000
-        self.A0 = G + Ts/Ti + Td/Ts
-        self.A1 = - (G + 2*Td/Ts)
-        self.A2 = Td/Ts
-#         print(self.A0, self.A1, self.A2)
+        self._current_delay = 10
+
         
 
     
@@ -182,28 +179,25 @@ method used when a "next minute" signal is received
 coroutine triggered by the 1-second local timer
 """
         while True:
-            delay =  int(max(900,min(self._current_delay,1100))) # we keep only the value between 900 and 1100 ms
+            delay = int(clamp(10, 1100, self._current_delay))
             await uasyncio.sleep_ms(delay) # this will avoid to use internal timer IRQ
             # measure the current period
             current_time = time.ticks_ms()
             probe.pulse_single() # for debugging purpose
-            current_period = max(900,min(current_time - self._last_time,1100)) # we keep only the value between 900 and 1100 ms
+            current_period = clamp(10, 1100, current_time - self._last_time) # we keep only the value between 900 and 1100 ms
             self._last_time = current_time
-            # compute error between current_period and 1000 ms target
-            delta = 1000 - current_period
-            self._delta.push(delta)
-            # compute PID corrector
-            self._current_delay = self._last_delay + self.A0*self._delta.register[0] + \
-                                  self.A1*self._delta.register[1] + self.A2*self._delta.register[2]
-            self._last_delay = self._current_delay
-
+            # compute error between current_period and 1000 ms target for PID corrector    
+            self._current_delay = self.pid.filter(1000 - current_period)
+            
+            # update time
             if self.seconds==59:
                 self.seconds = 0
                 self._next_minute()
             else:
                 self.seconds +=1
             self._display.update_date_and_time(self)
-            print( delta, self._current_delay ) # for debug purpose
+            
+            print( self._current_delay ) # for debug purpose
             
 
 
