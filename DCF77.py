@@ -2,8 +2,7 @@ import uasyncio, ustruct, time
 from machine import Timer
 from lib_pico.async_push_button import Button
 from lib_pico.ST7735_GUI import *
-# from lib_pico.means import FIFO
-from lib_pico.filter import PID, clamp
+from lib_pico.filter import PID, FilteredPID, clamp
 
 from debug_utility.pulses import Probe
 probe_gpio = 16
@@ -120,7 +119,7 @@ The local clock/calendar, triggered by 1-second local timer
         # Ti integration time constant of the PID corrector
         # Td derivative time constant of the PID corrector
         # Ts sampling time      
-        self.pid=PID( Ts=1000, G=.3 , Ti=2500 , Td=0) # values determined experimentally
+        self.pid=FilteredPID( Ts=1000, G=.55 , Ti=3000 , Td=10 , N=10) # values determined experimentally
 
         self._display = display
         self.year = 0
@@ -183,7 +182,7 @@ coroutine triggered by the 1-second local timer
             await uasyncio.sleep_ms(delay) # this will avoid to use internal timer IRQ
             # measure the current period
             current_time = time.ticks_ms()
-            probe.pulse_single() # for debugging purpose
+#             probe.pulse_single() # for debugging purpose
             current_period = clamp(10, 1100, current_time - self._last_time) # we keep only the value between 900 and 1100 ms
             self._last_time = current_time
             # compute error between current_period and 1000 ms target for PID corrector    
@@ -197,7 +196,7 @@ coroutine triggered by the 1-second local timer
                 self.seconds +=1
             self._display.update_date_and_time(self)
             
-            print( self._current_delay ) # for debug purpose
+#             print( self._current_delay ) # for debug purpose
             
 
 
@@ -224,7 +223,7 @@ the DCF decoder algorithm, triggered by the DCF radio signal after being process
    
     def _push(self, data):
         self._current_string += data
-#         probe.pulse_single(100)
+        probe.pulse_single(100)
 #         print(f"[{len(self._current_string)-1:2d}]={data:1s}\t{self._current_string}")
         if data == "#" :
             self._frame = self._current_string
