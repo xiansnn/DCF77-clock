@@ -1,7 +1,7 @@
 import uasyncio, ustruct, time
 from machine import Timer
 from lib_pico.async_push_button import Button
-from lib_pico.ST7735_GUI import *
+from lib_pico.ST7735_GUIv2 import *
 from lib_pico.filter import PID, FilteredPID, clamp
 
 from debug_utility.pulses import Probe
@@ -16,7 +16,7 @@ OUT_OF_SYNC = const("out of synchro")
 WAIT_SOF = const("waiting synchro")
 LOST_SIG = const("DCF signal lost")
 PRESENT_SIG = const("DCF signal present")
-SYNC = const("synchronised")
+SYNC = const("synchro OK")
 FRAME_ERROR = const("frame error")
 FRAME_INCOMPLETE = const("frame incomplete")
 
@@ -32,9 +32,9 @@ Defines how the DCF decoder displays time, calendar and status on the ST7735 LCD
         self.title_frame.write_text("DCF77 TIME")
         self.time_status_frame = self.display.add_frame("time_status",2,0,2,20,TFT.WHITE)
         self.signal_frame = self.display.add_frame("signal",1,0,1,20,TFT.WHITE)
-        self.date_frame = self.display.add_frame("date",4,0,4,20,TFT.WHITE)
+        self.date_frame = self.display.add_frame("date",4,0,6,20,TFT.WHITE, font_size_factor=(2,2))
+        self.time_frame = self.display.add_frame("time",7,2,12,20,TFT.WHITE, font_size_factor=(3,5) )
         self.second_frame = self.display.add_frame("second",13,0,13,20,TFT.WHITE)
-        self.time_frame = self.display.add_frame("time",7,0,12,20,TFT.WHITE)
         
     def update_time_status(self, status, color):
         self.time_status_frame.foreground_color = color
@@ -45,8 +45,11 @@ Defines how the DCF decoder displays time, calendar and status on the ST7735 LCD
         self.signal_frame.write_text(f"{status:>20s}")
 
     def update_date_and_time(self, time):
-        self.date_frame.write_text(f"  {time.week_day:>3s} {time.day:0>2d} {time.month:3s} 20{time.year:0>2d}   ")
-        self.second_frame.write_text(f"{time.seconds:0>2d} sec     zone:{time.time_zone:>4s}")
+#         self.date_frame.erase_frame()
+#         self.second_frame.erase_frame()
+#         self.time_frame.erase_frame()
+        self.date_frame.write_text(f"{time.week_day:>3s}-{time.day:0>2d}-{time.month:3s}")
+        self.second_frame.write_text(f"{time.seconds:0>2d}s 20{time.year:0>2d} zone:{time.time_zone:>4s}")
         self.time_frame.write_text(f"{time.hours:0>2d}:{time.minutes:0>2d}")
 
 
