@@ -14,21 +14,6 @@ micropython.alloc_emergency_exception_buf(100)
 
 TONE_GPIO = const(7) # the GPIO where DCF signal is received by MCU
 
-# time status
-INIT = "."
-SYNC = BLANK
-OUT_OF_SYNC = "O"
-
-WAIT_EOF = "E"
-WAIT_SOF = "S"
-
-FRAME_ERROR = "e"
-MISSING_DATA = "m"
-
-#signal status
-SIGNAL_LOST = "X"
-SIGNAL_RECEIVED = BLANK
-SIGNAL_LATE = "-"
 
 
 class DCF_Display():
@@ -76,59 +61,189 @@ class StatusController():
     - update_xxxx are the methods that display time calendar and DCF signal status
     - other methods are the events that trig state transitions
     """
+    # time status
+    SYNC = BLANK
+    OUT_OF_SYNC = "x"
+
+    WAIT_END_OF_FRAME = "<"
+    WAIT_NEW_FRAME = ">"
+
+    FRAME_ERROR = "e"
+    MISSING_DATA = "m"
+
+    #signal status
+    INIT = "."
+    SIGNAL_LOST = "X"
+    SIGNAL_RECEIVED = BLANK
+    SIGNAL_LATE = "-"
+
     def __init__(self, display):
         self.display = display
-        self.time_status = WAIT_SOF
         self.time_status_color = TFT.GRAY
-        self.signal_status = INIT
+        self.time_status = StatusController.WAIT_END_OF_FRAME
+        self.signal_status = StatusController.INIT
         self.display.update_time_status(self.time_status, self.time_status_color)
         self.display.update_signal_status(self.signal_status, TFT.RED )
         
+
+    # signal status management    
+    def signal_received(self, data):
+        if self.time_status == StatusController.OUT_OF_SYNC:
+            self.init_frame_decoding()
+        self.signal_status = StatusController.SIGNAL_RECEIVED
+        self.display.update_signal_status(data, self.time_status_color)
+    
+    def signal_timeout(self):
+        if (self.signal_status == StatusController.SIGNAL_LATE) :
+            self.signal_status = StatusController.SIGNAL_LOST
+            self.out_of_sync()
+            self.display.update_signal_status(StatusController.SIGNAL_LOST, self.time_status_color)
+        else :
+            if self.signal_status != StatusController.SIGNAL_LOST:
+                self.signal_status = StatusController.SIGNAL_LATE
+                self.display.update_signal_status(StatusController.SIGNAL_LATE, self.time_status_color)
+
+    # time status management
     def update_time_status(self, new_status, color):
         self.time_status = new_status
         self.time_status_color = color
         self.display.update_time_status(self.time_status, self.time_status_color)
 
-    # signal status management    
-    def signal_received(self, data):
-        if self.time_status == OUT_OF_SYNC:
-            self.update_time_status(WAIT_SOF, TFT.GRAY)
-        self.signal_status = SIGNAL_RECEIVED
-        self.display.update_signal_status(data, self.time_status_color)
-    
-    def signal_timeout(self):
-        if (self.signal_status == SIGNAL_LATE) :
-            self.signal_status = SIGNAL_LOST
-            self.out_of_sync()
-            self.display.update_signal_status(SIGNAL_LOST, self.time_status_color)
-        else :
-            if self.signal_status != SIGNAL_LOST:
-                self.signal_status = SIGNAL_LATE
-                self.display.update_signal_status(SIGNAL_LATE, self.time_status_color)
-
-    # time status management
+        # entering new state
     def out_of_sync(self):
-        self.update_time_status(OUT_OF_SYNC, TFT.RED)
-    
-    def start_sync(self):
-        self.update_time_status(WAIT_EOF, TFT.YELLOW)
-       
-    def new_minute_received(self):
-        if self.time_status!=WAIT_EOF:
-            self.start_sync()
-        else :
-            self.update_time_status(WAIT_SOF,TFT.GRAY)               
+        self.update_time_status(StatusController.OUT_OF_SYNC, TFT.RED)
+    def init_frame_decoding(self):   
+        self.update_time_status(StatusController.WAIT_END_OF_FRAME, TFT.GRAY)        
+    def start_frame_decoding(self):
+        self.update_time_status(StatusController.WAIT_NEW_FRAME, TFT.YELLOW)
+        self.update_time_status(StatusController.WAIT_END_OF_FRAME, TFT.YELLOW)
+    def wait_new_frame(self):
+        self.update_time_status(StatusController.WAIT_NEW_FRAME, TFT.YELLOW)
+    def sync_failed(self, error):    
+        self.update_time_status(error, TFT.ORANGE)
+    def sync_done(self):
+        self.update_time_status(StatusController.SYNC, TFT.GREEN)
+        self.update_time_status(StatusController.WAIT_NEW_FRAME, TFT.GREEN)
+        self.update_time_status(StatusController.WAIT_END_OF_FRAME, TFT.GREEN)
 
-    def frame_error(self):
-        self.update_time_status(FRAME_ERROR, TFT.ORANGE)
-        self.start_sync()
+        # processing event
+    def new_minute_received(self):
+        if self.time_status != StatusController.WAIT_END_OF_FRAME:
+            self.start_frame_decoding()
+        else :
+            self.wait_new_frame()               
+
+    def frame_parity_error(self):
+        self.sync_failed(StatusController.FRAME_ERROR)
+        self.start_frame_decoding()
         
     def frame_incomplete(self):
-        self.update_time_status(MISSING_DATA, TFT.ORANGE)
-        self.start_sync()
+        self.sync_failed(StatusController.MISSING_DATA)
+        self.start_frame_decoding()
     
-    def sync_done(self):
-        self.update_time_status(SYNC, TFT.GREEN)
+
+class DCF_Decoder():
+    """ the DCF decoder algorithm, triggered by the DCF radio signal after
+    being processed by electronic circuitry """
+    def __init__(self, key_in_gpio, local_time, status_controller):
+        self._DCF_clock_received = uasyncio.ThreadSafeFlag()
+        self._DCF_frame_received = uasyncio.ThreadSafeFlag()
+        Button("tone", key_in_gpio, pull=-1,
+               interrupt_service_routine=self._DCF_clock_IRQ_handler,
+               debounce_delay=80,
+               active_HI=True, both_edge=True )
+        self._time = local_time
+        self._status_controller = status_controller
+        self._current_string = ""
+        self._frame = "" 
+        self._DCF_signal_duration =0
+        self._DCF_signal_is_high = True
+        self._DCF_clock_received = uasyncio.ThreadSafeFlag()
+   
+    def _push(self, data):
+        self._current_string += data
+        self._status_controller.signal_received(data)
+#         print(f"data:{data}, current_buffer:{len(self._current_string)},{self._current_string}")
+        if data == "#" :
+            self._frame = self._current_string
+            self._current_string = ""
+  
+    def _DCF_clock_IRQ_handler(self, button):
+        irq_state = machine.disable_irq()
+        self._DCF_signal_duration = button.last_event_duration
+        self._DCF_signal_is_high = button.is_pressed           
+        if self._DCF_signal_is_high :
+            # we check the previous low level duration:
+            # - about 800ms means previous hi-level is 200ms (i.e. logic "1")
+            # - about 900ms means previous hi-level is 100ms (i.e. logic "0")
+            # - more than 1000ms means we've had a 1-second signal that means "next minute"
+            # including 800ms or 900ms for the last parity 59th bit 
+            if self._DCF_signal_duration >= 750 and self._DCF_signal_duration < 850 :
+                self._push("1") # we record a logic "1" signal
+            elif self._DCF_signal_duration >= 850 and self._DCF_signal_duration < 950 :
+                self._push("0") # we record a logic "0" signal
+            elif self._DCF_signal_duration >= 1750 and self._DCF_signal_duration < 1950 :
+                if self._DCF_signal_duration < 1850 :
+                    self._push("1")
+                else :
+                    self._push("0")
+                self._push("#") # we record a "next minute" signal (coded by "#")
+                self._DCF_frame_received.set()
+   
+        self._DCF_clock_received.set()
+        machine.enable_irq(irq_state)     
+        
+    def _BCD_decoder(self, string):
+        BCD_weight = [1, 2, 4, 8, 10, 20, 40, 80]
+        value = 0
+        for k in range(len(string)):
+            value += BCD_weight[k]*int(string[k])
+        return value
+    
+    def _frame_parity_is_valid(self):
+        s0 = (self._frame[0]  == "0") # check start of frame, always "0"
+        s1 = (self._frame[20] == "1") # check start of time encoding, always "1"
+        p1 = (self._frame[21:29].count("1")%2 == 0) # check parity
+        p2 = (self._frame[29:36].count("1")%2 == 0) # check parity
+        p3 = (self._frame[36:59].count("1")%2 == 0) # check parity
+        return (s0 and s1 and p1 and p2 and p3)        
+
+    def _all_bits_received(self):
+        return len(self._frame)==60
+        
+    async def frame_decoder(self):
+        """ coroutine that decode DCF signal, triggered by the reception of End of Frame"""
+        while True:
+            await self._DCF_frame_received.wait()
+            self._time.start_new_minute()
+            if not self._all_bits_received():   
+                self._status_controller.frame_incomplete()
+            else:
+                if not self._frame_parity_is_valid():
+                    self._status_controller.frame_parity_error()
+                else: # we have now, a full frame without reception error
+                    time_zone_num = self._BCD_decoder(self._frame[17:19])
+                    minutes = self._BCD_decoder(self._frame[21:28])
+                    hours = self._BCD_decoder(self._frame[29:35])
+                    day = self._BCD_decoder(self._frame[36:42])
+                    week_day_num = self._BCD_decoder(self._frame[42:45])
+                    month_num = self._BCD_decoder(self._frame[45:50])
+                    year = self._BCD_decoder(self._frame[50:58])
+                    self._time.update_time(ustruct.pack("6HB",
+                         year, month_num, day, week_day_num, hours, minutes, time_zone_num))
+                    self._status_controller.sync_done()
+
+    async def DCF_signal_monitoring(self):
+        while True:
+            try:
+                await uasyncio.wait_for_ms(self._DCF_clock_received.wait(), 4000)
+                self._DCF_clock_received.clear()
+
+            except uasyncio.TimeoutError:
+#                 print("timeout")
+                self._status_controller.signal_timeout()
+
+
 
 
 class LocalTimeCalendar():
@@ -195,7 +310,7 @@ class LocalTimeCalendar():
         """ coroutine triggered by the 1-second local timer """
         while True:
             delay = int(clamp(10, 1100, self._current_delay))
-            await uasyncio.sleep_ms(delay) # this will avoid to use internal timer IRQ
+            await uasyncio.sleep_ms(delay) # this is a workaround for u=issues with the use of internal timer IRQ
             # measure the current period
             current_time = time.ticks_ms()
             current_period = clamp(10, 1100, current_time - self._last_time) # we keep only the value between 900 and 1100 ms
@@ -211,108 +326,6 @@ class LocalTimeCalendar():
                 self.seconds +=1
             self._display.update_date_and_time(self)
   
-
-
-class DCF_Decoder():
-    """ the DCF decoder algorithm, triggered by the DCF radio signal after
-    being processed by electronic circuitry """
-    def __init__(self, key_in_gpio, time, status_controller):
-        self._DCF_clock_received = uasyncio.ThreadSafeFlag()
-        self._DCF_frame_received = uasyncio.ThreadSafeFlag()
-        Button("tone", key_in_gpio, pull=-1,
-               interrupt_service_routine=self._DCF_clock_IRQ_handler,
-               debounce_delay=80,
-               active_HI=True, both_edge=True )
-        self._time = time
-        self._status_controller = status_controller
-        self._current_string = ""
-        self._frame = "" 
-        self._DCF_signal_duration =0
-        self._DCF_signal_is_high = True
-        self._DCF_clock_received = uasyncio.ThreadSafeFlag()
-   
-    def _push(self, data):
-        self._current_string += data
-        self._status_controller.signal_received(data)
-        if data == "#" :
-            self._frame = self._current_string
-            self._current_string = ""
-
-    def _frame_completed(self):
-        return len(self._frame)==60
-    
-    def _DCF_clock_IRQ_handler(self, button):
-        irq_state = machine.disable_irq()
-        self._DCF_signal_duration = button.last_event_duration
-        self._DCF_signal_is_high = button.is_pressed           
-        if self._DCF_signal_is_high :
-            # we check the previous low level duration:
-            # - about 800ms means previous hi-level is 200ms (i.e. logic "1")
-            # - about 900ms means previous hi-level is 100ms (i.e. logic "0")
-            # - more than 1000ms means we've had a 1-second signal that means "next minute"
-            # including 800ms or 900ms for the last parity 59th bit 
-            if self._DCF_signal_duration >= 750 and self._DCF_signal_duration < 850 :
-                self._push("1") # we record a logic "1" signal
-            elif self._DCF_signal_duration >= 850 and self._DCF_signal_duration < 950 :
-                self._push("0") # we record a logic "0" signal
-            elif self._DCF_signal_duration >= 1750 and self._DCF_signal_duration < 1950 :
-                if self._DCF_signal_duration < 1850 :
-                    self._push("1")
-                else :
-                    self._push("0")
-                self._push("#") # we record a "next minute" signal (coded by "#")
-                self._DCF_frame_received.set()
-   
-        self._DCF_clock_received.set()
-        machine.enable_irq(irq_state)     
-        
-    def _BCD_decoder(self, string):
-        BCD_weight = [1, 2, 4, 8, 10, 20, 40, 80]
-        value = 0
-        for k in range(len(string)):
-            value += BCD_weight[k]*int(string[k])
-        return value
-    
-    def _frame_is_valid(self):
-        s0 = (self._frame[0]  == "0") # check start of frame, always "0"
-        s1 = (self._frame[20] == "1") # check start of time encoding, always "1"
-        p1 = (self._frame[21:29].count("1")%2 == 0) # check parity
-        p2 = (self._frame[29:36].count("1")%2 == 0) # check parity
-        p3 = (self._frame[36:59].count("1")%2 == 0) # check parity
-        return (s0 and s1 and p1 and p2 and p3)        
-        
-    async def frame_decoder(self):
-        """ coroutine that decode DCF signal, triggered by the reception of End of Frame"""
-        while True:
-            await self._DCF_frame_received.wait()
-            self._time.start_new_minute()
-#             self._status_controller.new_minute_received()
-            if not self._frame_completed():   
-                self._status_controller.frame_incomplete()
-            else:
-                if not self._frame_is_valid():
-                    self._status_controller.frame_error()
-                else: # we have now, a full frame without reception error
-                    time_zone_num = self._BCD_decoder(self._frame[17:19])
-                    minutes = self._BCD_decoder(self._frame[21:28])
-                    hours = self._BCD_decoder(self._frame[29:35])
-                    day = self._BCD_decoder(self._frame[36:42])
-                    week_day_num = self._BCD_decoder(self._frame[42:45])
-                    month_num = self._BCD_decoder(self._frame[45:50])
-                    year = self._BCD_decoder(self._frame[50:58])
-                    self._time.update_time(ustruct.pack("6HB",
-                         year, month_num, day, week_day_num, hours, minutes, time_zone_num))
-                    self._status_controller.sync_done()
-
-    async def DCF_signal_monitoring(self):
-        while True:
-            try:
-                await uasyncio.wait_for_ms(self._DCF_clock_received.wait(), 2500)
-                self._DCF_clock_received.clear()
-
-            except uasyncio.TimeoutError:
-                pass
-                self._status_controller.signal_timeout()
 
     
 
