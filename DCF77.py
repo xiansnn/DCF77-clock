@@ -62,14 +62,15 @@ class StatusController():
     - other methods are the events that trig state transitions
     """
     # time status
-    SYNC = BLANK
     OUT_OF_SYNC = "x"
+    START_NEW_FRAME = "<"
 
-    WAIT_END_OF_FRAME = "<"
-    WAIT_NEW_FRAME = ">"
-
+    SYNC = BLANK
     FRAME_ERROR = "e"
     MISSING_DATA = "m"
+
+    END_OF_FRAME = ">"
+
 
     #signal status
     INIT = "."
@@ -79,27 +80,29 @@ class StatusController():
 
     def __init__(self, display):
         self.display = display
+        # init_frame_decoding
+        self.time_status = StatusController.START_NEW_FRAME
         self.time_status_color = TFT.GRAY
-        self.time_status = StatusController.WAIT_END_OF_FRAME
-        self.signal_status = StatusController.INIT
         self.display.update_time_status(self.time_status, self.time_status_color)
+        # init signal status management
+        self.signal_status = StatusController.INIT
         self.display.update_signal_status(self.signal_status, TFT.RED )
         
-
     # signal status management    
     def signal_received(self, data):
         if self.time_status == StatusController.OUT_OF_SYNC:
-            self.init_frame_decoding()
+            self.start_new_frame(TFT.GRAY)
         self.signal_status = StatusController.SIGNAL_RECEIVED
         self.display.update_signal_status(data, self.time_status_color)
     
     def signal_timeout(self):
         if (self.signal_status == StatusController.SIGNAL_LATE) :
-            self.signal_status = StatusController.SIGNAL_LOST
             self.out_of_sync()
+            self.signal_status = StatusController.SIGNAL_LOST
             self.display.update_signal_status(StatusController.SIGNAL_LOST, self.time_status_color)
         else :
             if self.signal_status != StatusController.SIGNAL_LOST:
+                self.start_new_frame(TFT.GRAY)
                 self.signal_status = StatusController.SIGNAL_LATE
                 self.display.update_signal_status(StatusController.SIGNAL_LATE, self.time_status_color)
 
@@ -112,34 +115,31 @@ class StatusController():
         # entering new state
     def out_of_sync(self):
         self.update_time_status(StatusController.OUT_OF_SYNC, TFT.RED)
-    def init_frame_decoding(self):   
-        self.update_time_status(StatusController.WAIT_END_OF_FRAME, TFT.GRAY)        
-    def start_frame_decoding(self):
-        self.update_time_status(StatusController.WAIT_NEW_FRAME, TFT.YELLOW)
-        self.update_time_status(StatusController.WAIT_END_OF_FRAME, TFT.YELLOW)
-    def wait_new_frame(self):
-        self.update_time_status(StatusController.WAIT_NEW_FRAME, TFT.YELLOW)
+    def start_new_frame(self, color):
+        self.update_time_status(StatusController.START_NEW_FRAME, color)
     def sync_failed(self, error):    
         self.update_time_status(error, TFT.ORANGE)
+        self.update_time_status(StatusController.END_OF_FRAME, TFT.ORANGE)
     def sync_done(self):
         self.update_time_status(StatusController.SYNC, TFT.GREEN)
-        self.update_time_status(StatusController.WAIT_NEW_FRAME, TFT.GREEN)
-        self.update_time_status(StatusController.WAIT_END_OF_FRAME, TFT.GREEN)
+        self.update_time_status(StatusController.END_OF_FRAME, TFT.GREEN)       
 
         # processing event
     def new_minute_received(self):
-        if self.time_status != StatusController.WAIT_END_OF_FRAME:
-            self.start_frame_decoding()
+        if self.time_status != StatusController.START_NEW_FRAME:
+            self.start_new_frame(TFT.GRAY)
         else :
-            self.wait_new_frame()               
-
+            self.start_new_frame(TFT.YELLOW)               
     def frame_parity_error(self):
         self.sync_failed(StatusController.FRAME_ERROR)
-        self.start_frame_decoding()
-        
+        self.start_new_frame(TFT.ORANGE)        
     def frame_incomplete(self):
         self.sync_failed(StatusController.MISSING_DATA)
-        self.start_frame_decoding()
+        self.start_new_frame(TFT.ORANGE)
+    def frame_OK(self):
+        self.sync_done()
+        self.start_new_frame(TFT.GREEN)
+    
     
 
 class DCF_Decoder():
@@ -222,6 +222,7 @@ class DCF_Decoder():
                 if not self._frame_parity_is_valid():
                     self._status_controller.frame_parity_error()
                 else: # we have now, a full frame without reception error
+                    self._status_controller.frame_OK()
                     time_zone_num = self._BCD_decoder(self._frame[17:19])
                     minutes = self._BCD_decoder(self._frame[21:28])
                     hours = self._BCD_decoder(self._frame[29:35])
@@ -231,7 +232,6 @@ class DCF_Decoder():
                     year = self._BCD_decoder(self._frame[50:58])
                     self._time.update_time(ustruct.pack("6HB",
                          year, month_num, day, week_day_num, hours, minutes, time_zone_num))
-                    self._status_controller.sync_done()
 
     async def DCF_signal_monitoring(self):
         while True:
