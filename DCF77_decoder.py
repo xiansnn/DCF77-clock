@@ -24,12 +24,11 @@ class DCF_Decoder():
                debounce_delay=80,
                active_HI=True, both_edge=True )
         self._time = local_time
-        self._status_controller = _StatusController(display)
+        self._status_controller = _StatusController(display, local_time)
         self._current_string = ""
         self._frame = "" 
         self._DCF_signal_duration =0
         self._DCF_signal_is_high = True
-        self._DCF_clock_received = uasyncio.ThreadSafeFlag()
    
     def _push(self, data):
         self._current_string += data
@@ -85,7 +84,7 @@ class DCF_Decoder():
         """ coroutine that decodes DCF signal, triggered by the reception of End of Frame"""
         while True:
             await self._DCF_frame_received.wait()
-            self._time.start_new_minute()
+            self._status_controller.end_of_frame_received()
             if not self._all_bits_received():   
                 self._status_controller.frame_incomplete(len(self._frame))
             else:
@@ -116,11 +115,12 @@ class DCF_Decoder():
 class _StatusController():
     """
     """    
-    def __init__(self, display):
+    def __init__(self, display, local_time):
         self.display = display
+        self.local_time = local_time
         # init_frame_decoding
-        self.time_status = _StatusController.START_DECODING
-        self.time_event  = _StatusController.START_DECODING
+        self.time_status = _StatusController.SYNC_IN_PROGRESS
+        self.time_event  = _StatusController.TIME_INIT
         self.display.update_time_status(self.time_event, self.time_status)
         # init signal status management
         self.signal_status = _StatusController.SIGNAL_INIT
@@ -130,21 +130,22 @@ class _StatusController():
     # Signal status management
     #signal states
     SIGNAL_INIT = const("SIGNAL_INIT")
-    SIGNAL_LOST = const("SIGNAL_LOST")
-    SIGNAL_LATE = const("SIGNAL_LATE")
     SIGNAL_RECEPTION_OK = const("RECEPTION_OK")
+    SIGNAL_LATE = const("SIGNAL_LATE")
+    SIGNAL_LOST = const("SIGNAL_LOST")
     #signal events
     SIGNAL_RECEIVED = const("SIGNAL_RECEIVED")
     SIGNAL_TIMEOUT  = const("SIGNAL_TIMEOUT")
-    def update_signal_status(self, current_string, event, new_status):
-        self.signal_event =event
+    
+    def update_signal_status(self, current_string, new_event, new_status):
+        self.signal_event = new_event
         self.signal_status = new_status
         self.display.update_signal_status(current_string, self.signal_event, self.signal_status)
         
     def signal_received(self, current_string):
-        event = _StatusController.SIGNAL_RECEIVED
         if self.time_status == _StatusController.OUT_OF_SYNC:
-            self.start_decoding()
+            self.restart_sync()
+        event = _StatusController.SIGNAL_RECEIVED
         self.update_signal_status(current_string, event, _StatusController.SIGNAL_RECEPTION_OK)
     
     def signal_timeout(self):
@@ -162,44 +163,52 @@ class _StatusController():
     TIME_INIT = const("TIME_INIT")
     OUT_OF_SYNC = const("OUT_OF_SYNC")
     SYNC_IN_PROGRESS = const("SYNC_IN_PROGRESS")
-    SYNC_FAILED = const("SYNC_FAILED")
-    #time events
     START_DECODING = const("START_DECODING")
+    SYNC_FAILED = const("SYNC_FAILED")
     SYNC = const("SYNC")
-    FRAME_ERROR = const("FRAME_PARITY_ERROR")
-    MISSING_DATA = const("MISSING_DATA")
-    END_OF_DECODING = const("END_OF_DECODING")
+    END_DECODING = const("END_OF_DECODING")
     
-    def update_time_status(self, new_status, message=""):
-        self.time_event = self.time_status
+    #time events
+    EoF_RECEIVED = const("EOF")
+    FRAME_ERROR = const("FRAME_ERROR")
+    FRAME_OK = const("FRAME_OK")
+    MISSING_DATA = const("MISSING_DATA")
+    
+    def update_time_status(self, new_event, new_status, message=""):
+        self.time_event = new_event
         self.time_status = new_status
         self.display.update_time_status(self.time_event, self.time_status, message)
 
         # entering new state
     def out_of_sync(self):
-        self.update_time_status(_StatusController.OUT_OF_SYNC)
+        self.update_time_status(_StatusController.SIGNAL_LOST ,_StatusController.OUT_OF_SYNC)
     def start_decoding(self):
-        self.update_time_status(_StatusController.START_DECODING)
+        self.update_time_status(_StatusController.EoF_RECEIVED, _StatusController.START_DECODING)
+    def end_decoding(self):
+        self.update_time_status("-", _StatusController.END_DECODING)
     def sync_failed(self, error, message):
-        self.update_time_status(error, message)
-        self.update_time_status(_StatusController.END_OF_DECODING)
+        self.update_time_status(error, "-", message)
+        self.end_decoding
     def sync_done(self):
-        self.update_time_status(_StatusController.SYNC)
-        self.update_time_status(_StatusController.END_OF_DECODING)       
+        self.update_time_status(_StatusController.FRAME_OK, _StatusController.SYNC)
+        self.end_decoding
+    def restart_sync(self):
+        self.update_time_status(_StatusController.SIGNAL_RECEIVED, _StatusController.SYNC_IN_PROGRESS)
 
         # processing event
-    def new_minute_received(self):
+    def end_of_frame_received(self):
+        self.local_time.start_new_minute()
         self.start_decoding()
     def frame_parity_error(self):
-        self.sync_failed(_StatusController.FRAME_ERROR, "")
-        self.start_decoding()        
+        self.sync_failed(_StatusController.FRAME_ERROR, "parity error")
+        self.end_decoding()        
     def frame_incomplete(self, frame_size):
         message = f"frame size: {str(frame_size)}"
         self.sync_failed(_StatusController.MISSING_DATA, message)
-        self.start_decoding()
+        self.end_decoding()
     def frame_OK(self):
         self.sync_done()
-        self.start_decoding()
+        self.end_decoding()
     
     
 
@@ -213,9 +222,13 @@ if __name__ == "__main__":
     
     TONE_GPIO = const(7) # the GPIO where DCF signal is received by MCU
     
+    DISPLAY_SIGNAL_STATUS_TAB = const("\t\t\t")
+    DISPLAY_TIME_STATUS_TAB   = const("\t\t\t\t\t")
+    LOCAL_TIME_TAB            = const("\t\t\t\t\t\t\t")
+
     class LocalTimeCalendar_stub():
         def __init__(self, display):
-            print("\t\tinit LocalTimeCalendar_stub")
+            print(f"{LOCAL_TIME_TAB}init LocalTimeCalendar_stub")
             self.year = 0
             self.month = "xxx"
             self._month_values = ["xxx","JAN","FEV","MAR","AVR","MAI","JUN","JUL","AOU","SEP","OCT","NOV","DEC"]
@@ -237,11 +250,11 @@ if __name__ == "__main__":
             self.hours = hours
             self.minutes = minutes
             self.time_zone = self._time_zone_values[time_zone]
-            print(f"\t\t\t\t\t\t\tDCF calendar:\t{self.week_day} {self.day} {self.month} 20{self.year}")
-            print(f"\t\t\t\t\t\t\tDCF time:\t\t{self.hours:0>2d}:{self.minutes:0>2d}\t\tzone:{self.time_zone}")
+            print(f"{LOCAL_TIME_TAB}LocalCalendar:\t{self.week_day} {self.day} {self.month} 20{self.year}")
+            print(f"{LOCAL_TIME_TAB}LocalTime:\t\t{self.hours:0>2d}:{self.minutes:0>2d}\t\tzone:{self.time_zone}")
 
         def start_new_minute(self):
-            print(f"\t\tstart_new_minute")
+            print(f"{LOCAL_TIME_TAB}LocalTime: start_new_minute")
 
 
     class DCF_Display_stub():
@@ -249,15 +262,15 @@ if __name__ == "__main__":
             print("\t\tinit DCF_Display_stub")
             
         def update_time_status(self, event, new_status, message=""):
-            print(f"\t\t\t\t\t\t\t--{event:^20s}-->[{new_status:^20s}] : '{message}'")
+            print(f"\t\t\t\t\t\t\t-- ({event:^20s}) --> [{new_status:^20s}] : '{message}'")
    
         def update_signal_status(self, current_string, event, new_status):
             if current_string != None:
                 data = current_string[-1]
                 rank = len(current_string)-1
-                print(f"--{event:^20s}-->[{new_status:^20s}] : Data[{rank:0>2d}] = {data}")
+                print(f"-- ({event:^20s}) --> [{new_status:^20s}] : Data[{rank:0>2d}] = {data}")
             else:
-                print(f"--{event:^20s}-->[{new_status:^20s}] : No Data")
+                print(f"-- ({event:^20s}) --> [{new_status:^20s}] : No Data")
     
     
     
