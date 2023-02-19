@@ -5,14 +5,14 @@ import micropython
 micropython.alloc_emergency_exception_buf(100)
 
 from debug_utility.pulses import Probe
-D0 = Probe(26)
-D1 = Probe(16)
-D2 = Probe(17)
-D3 = Probe(18)
-D4 = Probe(19)
-D5 = Probe(20)
-D6 = Probe(21)
-D7 = Probe(22)
+D0 = Probe(26) # lib_pico.filter.PID.filter
+D1 = Probe(16) # -
+D2 = Probe(17) # DCF_Decoder_stub.frame_decoder
+D3 = Probe(18) # DCF_Display_stub.update_time_status
+D4 = Probe(19) # -
+D5 = Probe(20) # DCF_Display_stub.update_date_and_time
+D6 = Probe(21) # DCF_Decoder_stub._end_of_frame
+D7 = Probe(22) # LocalTimeCalendar.update_display
 
 
 class LocalTimeCalendar():
@@ -33,9 +33,9 @@ The one-second period is adjusted by a PID servo_loop, in order to take into acc
         self._current_delay = 10
 
         #init conversion tables
-        self._month_values = ["xxx","JAN","FEV","MAR","AVR","MAI","JUN","JUL","AOU","SEP","OCT","NOV","DEC"]
-        self._week_day_values = ["xxx","LUN","MAR","MER","JEU","VEN","SAM","DIM"]
-        self._time_zone_values = [0,2,1] #time_zone = 2 => CET = +1, time_zone = 1 => CEST = +2
+        self._month_values = ("JAN","FEV","MAR","AVR","MAI","JUN","JUL","AOU","SEP","OCT","NOV","DEC")
+        self._week_day_values = ("LUN","MAR","MER","JEU","VEN","SAM","DIM")
+        self._time_zone_values = (0,2,1) #time_zone = 2 => CET = +1, time_zone = 1 => CEST = +2
         
         #init local time
         self.year = 0
@@ -52,35 +52,24 @@ The one-second period is adjusted by a PID servo_loop, in order to take into acc
                        self.hours, self.minutes, self.seconds, self.time_zone)
         self._display.update_date_and_time(clock_update)
 
-    def update_time(self, time_pack):
+    def sync_time(self, time_pack):
         """
         When a DCF frame is received, the decoder packs a set of bites
         and this set is used to update the local clock
         """
-        D6.on()
         (year, month, day, week_day, hours, minutes, time_zone) = ustruct.unpack("6HB",time_pack)
-        self.year = year
-        self.month = self._month_values[month]
+        self.year = 2000+year
+        self.month = self._month_values[month-1]
         self.day = day
-        self.week_day = self._week_day_values[week_day]
+        self.week_day = self._week_day_values[week_day-1]
         self.hours = hours
         self.minutes = minutes
         self.seconds = 0
         self.time_zone = self._time_zone_values[time_zone]
-        clock_update = (self.week_day, self.day, self.month, self.year,
-                       self.hours, self.minutes, self.seconds, self.time_zone)
-        self._display.update_date_and_time(clock_update)
-        D6.off()
+
 
     def start_new_minute(self):
-        """ method used when a "next minute" signal is received """
-        D5.on()
-        self.minutes +=1
-        self.seconds = 0
-        clock_update = (self.week_day, self.day, self.month, self.year,
-                       self.hours, self.minutes, self.seconds, self.time_zone)
-        self._display.update_date_and_time(clock_update)
-        D5.off()
+        self.seconds = 59
         
     def _next_hour(self):
         if self.hours==23:
@@ -100,9 +89,7 @@ The one-second period is adjusted by a PID servo_loop, in order to take into acc
         while True:
             #triggering the coroutine
             delay = int(clamp(10, 1100, self._current_delay))
-            D7.off()
             await uasyncio.sleep_ms(delay)
-            D7.on()
                 # measure the current period
             current_time = utime.ticks_ms()
             current_period = clamp(10, 1100, current_time - self._last_time) # we keep only the value between 900 and 1100 ms
@@ -116,12 +103,19 @@ The one-second period is adjusted by a PID servo_loop, in order to take into acc
             if self.seconds==59:
                 self.seconds = 0
                 self._next_minute()
-                clock_update = (self.week_day, self.day, self.month, self.year,
-                       self.hours, self.minutes, self.seconds, self.time_zone)
-                self._display.update_date_and_time(clock_update)
             else:
                 self.seconds +=1
-                self._display.update_seconds(self.seconds)
+            self.update_display()
+      
+    def update_display(self):
+        D7.on()
+        DCF_clock_update = (self.week_day, self.day, self.month, self.year,
+                       self.hours, self.minutes, self.seconds, self.time_zone)
+        self._display.update_date_and_time(DCF_clock_update)
+        self._display.update_seconds(self.seconds)
+        D7.off()
+
+            
             
             
 if __name__ == "__main__":
@@ -137,22 +131,28 @@ if __name__ == "__main__":
             print("init DCF_Display_stub")
             
         def update_time_status(self, event, new_status, message=""):
+            D3.on()
             print(f"{TIME_STATUS_TAB}time_status\t-- ({event:^20s}) --> [{new_status:^20s}] : {message}")
+            D3.off()
    
         def update_signal_status(self, current_string, event, new_status):
+            D4.on()
             if current_string != None:
                 data = current_string[-1]
                 rank = len(current_string)-1
                 print(f"{SIGNAL_STATUS_TAB}signal_status\t-- ({event:^20s}) --> [{new_status:^20s}] : Data[{rank:0>2d}] = {data}")
             else:
                 print(f"{SIGNAL_STATUS_TAB}signal_status\t-- ({event:^20s}) --> [{new_status:^20s}] : No Data")
+            D4.off()
                 
         def update_date_and_time(self, clock_update):
+            D5.on()
             week_day , day, month, year, hours, minutes, seconds, time_zone = clock_update
             print(f"{LOCAL_TIME_TAB}LocalTime:\t{week_day} {day} {month} 20{year:0>2d}\t{hours:0>2d}:{minutes:0>2d}:{seconds:0>2d}\tgmt{time_zone:<+3d}")
-        
+            D5.off()
+            
         def update_seconds(self, seconds):
-            print(f"{LOCAL_TIME_TAB}LocalTime:{seconds:0>2d}")
+            pass
             
     class DCF_decoder_stub():
         def __init__(self,local_clock_calendar, display):
@@ -175,6 +175,7 @@ if __name__ == "__main__":
             self.month = randint(1,12)
             self.week_day_num = randint(1,7)
             self.year = randint(20,30)
+            self.display.update_time_status("CHANGE CALENDAR", "SYNC")
             
         async def frame_decoder(self):
             while True:
@@ -183,12 +184,14 @@ if __name__ == "__main__":
                 D2.on()
                 print("Frame sync")
                 self._change_calendar()
-                self._local_time.update_time(ustruct.pack("6HB",
+                self._local_time.sync_time(ustruct.pack("6HB",
                      self.year, self.month, self.day, self.week_day_num, self.hours, self.minutes, self.time_zone_num))
         
         async def _end_of_frame(self):
             while True:
+                D6.off()
                 await uasyncio.sleep(randint(15,25))
+                D6.on()
                 print("EoF")
                 self._local_time.start_new_minute()
                 

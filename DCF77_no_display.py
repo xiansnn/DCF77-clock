@@ -7,7 +7,7 @@ TONE_GPIO = const(7) # the GPIO where DCF signal is received by MCU
 
 SIGNAL_STATUS_TAB = const("")
 TIME_STATUS_TAB   = const("\t\t")
-LOCAL_TIME_TAB            = const("\t\t\t\t\t\t\t\t\t")
+LOCAL_TIME_TAB    = const("\t\t\t\t\t\t\t\t\t")
 
 
 class DCF_Display_stub():
@@ -28,6 +28,9 @@ class DCF_Display_stub():
     def update_date_and_time(self, time_string):
         week_day , day, month, year, hours, minutes, seconds, time_zone = time_string
         print(f"{LOCAL_TIME_TAB}LocalTime:\t{week_day} {day} {month} 20{year}\t{hours:0>2d}:{minutes:0>2d}:{seconds:0>2d}\tzone:{time_zone}")
+
+    def update_seconds(self, seconds):
+        print(f"{LOCAL_TIME_TAB}{seconds:0>2d}")
 
 
 ################### test ############################ 

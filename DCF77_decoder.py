@@ -5,14 +5,14 @@ import micropython
 micropython.alloc_emergency_exception_buf(100)
 
 from debug_utility.pulses import Probe
-D1 = Probe(16)
-D2 = Probe(17)
-D3 = Probe(18)
-D4 = Probe(19)
-D5 = Probe(20)
-D6 = Probe(21)
-D7 = Probe(22)
-D0 = Probe(26)
+D0 = Probe(26) # -
+D1 = Probe(16) # DCF_Decoder._DCF_clock_IRQ_handler
+D2 = Probe(17) # DCF_Decoder.frame_decoder
+D3 = Probe(18) # DCF_Display_stub.update_time_status
+D4 = Probe(19) # DCF_Display_stub.update_signal_status
+D5 = Probe(20) # DCF_Display_stub.update_date_and_time
+D6 = Probe(21) # -- time_status == SYNC
+D7 = Probe(22) # -- refresh(ssd)
 
 
 #signal states
@@ -40,50 +40,13 @@ MISSING_DATA = const("WRONG_NUMBER_OF_DATA")
 
 
 class DCF_Decoder():
-    """
-DFC decoder implementation.
-the constructor needs:
-- key_in_gpio : the GPIO input that receives the DCF signals. This input is processed as a push button with debounce
-and rising and falling edge mesurement.
-
-- local_time() : a local timer/calendar. Used to maintain the current time even if the DCF signal is lost.
-    local_time() constructor needs the display() program.
-    local_time() must have two API:
-    - start_new_minute() : this is used to synchronise the local timer with the "new minute" signal sent by DCF77.
-    - update_time(time_pack) : this is used to give the decoding result to the local timer.
-        time_pack is a byte structured block :
-            ustruct.pack("6HB", year, month_num, day, week_day_num, hours, minutes, time_zone_num).
-        
-- display() : the display program.
-    display() constructor needs no arguments.
-    The following API is required :
-    - update_time_status(event, new_status, message=""), sent by _StatusController, every minutes or when the signal is lost.
-        The status and the last event that triggered this status are provided, as well as a message,
-        if appropriate (e.g. the number of actually received frame bits.
-    - update_signal_status(current_frame, event, new_status), sent by _StatusController, every seconds.
-        The status and the last event that triggered this status are also provided.
-        The current_frame buffer is passed as argument; this can be used to display the last received bit.
-    - update_date_and_time(time_string), sent by local_time() every minute.
-        time_string is a tuple with time and calendar strings to display
-    - update_date_seconds(second), normally sent by local_time() every seconds.
-
-The decoder as only two asyncio coroutines :
-- frame_decoder() : the routine that decodes received frame every minutes.
-- DCF_signal_monitoring() : the routine that monitor the signal and manages the signal loss.
-A "private class" is also provided : _StatusController(display)
-
-    """
     def __init__(self, key_in_gpio, local_time, display):
         self._DCF_clock_received = uasyncio.ThreadSafeFlag()
         self._DCF_frame_received = uasyncio.ThreadSafeFlag()
-#         Button("tone", key_in_gpio, pull=-1,
-#                interrupt_service_routine=self._DCF_clock_IRQ_handler,
-#                debounce_delay=80,
-#                active_HI=True, both_edge=True )
         Button("tone", key_in_gpio, pull=-1,
                interrupt_service_routine=self._DCF_clock_IRQ_handler,
                debounce_delay=80,
-               active_HI=True, both_edge=False )
+               active_HI=True, both_edge=True )
         self._local_time = local_time
         self._status_controller = _StatusController(display)
         self._current_string = ""
@@ -123,8 +86,7 @@ A "private class" is also provided : _StatusController(display)
                 self._DCF_frame_received.set()
         machine.enable_irq(irq_state)
         D1.off()
-    
-        
+         
     def _BCD_decoder(self, string):
         BCD_weight = [1, 2, 4, 8, 10, 20, 40, 80]
         value = 0
@@ -149,7 +111,6 @@ A "private class" is also provided : _StatusController(display)
             D2.off()
             await self._DCF_frame_received.wait()
             D2.on()
-#             self._status_controller.end_of_frame_received()
             if not self._all_bits_received():   
                 self._status_controller.frame_incomplete(len(self._frame))
                 self._local_time.start_new_minute()
@@ -166,7 +127,7 @@ A "private class" is also provided : _StatusController(display)
                     week_day_num = self._BCD_decoder(self._frame[42:45])
                     month_num = self._BCD_decoder(self._frame[45:50])
                     year = self._BCD_decoder(self._frame[50:58])
-                    self._local_time.update_time(ustruct.pack("6HB",
+                    self._local_time.sync_time(ustruct.pack("6HB",
                          year, month_num, day, week_day_num, hours, minutes, time_zone_num))
 
     async def DCF_signal_monitoring(self):
@@ -183,7 +144,6 @@ class _StatusController():
     """    
     def __init__(self, display):
         self.display = display
-#         self.local_time = local_time
         # init_frame_decoding
         self.time_status = SYNC_IN_PROGRESS
         self.time_event  = TIME_INIT
@@ -196,11 +156,9 @@ class _StatusController():
     # Signal status management
     
     def update_signal_status(self, current_string, new_event, new_status):
-        D3.on()
         self.signal_event = new_event
         self.signal_status = new_status
         self.display.update_signal_status(current_string, self.signal_event, self.signal_status)
-        D3.off()
         
     def signal_received(self, current_string):
         if self.time_status == OUT_OF_SYNC:
@@ -221,11 +179,9 @@ class _StatusController():
     # Time/Calendar status management
     
     def update_time_status(self, new_event, new_status, message=""):
-        D4.on()
         self.time_event = new_event
         self.time_status = new_status
         self.display.update_time_status(self.time_event, self.time_status, message)
-        D4.off()
 
         # entering new state
     def out_of_sync(self):
@@ -261,7 +217,7 @@ if __name__ == "__main__":
     
     SIGNAL_STATUS_TAB = const("")
     TIME_STATUS_TAB   = const("\t\t")
-    LOCAL_TIME_TAB            = const("\t\t\t\t\t\t\t\t\t")
+    LOCAL_TIME_TAB    = const("\t\t\t\t\t\t\t\t\t")
 
     class LocalTimeCalendar_stub():
         def __init__(self, display):
@@ -280,8 +236,7 @@ if __name__ == "__main__":
             self._time_zone_values = ["GMT","CEST","CET"]
 
       
-        def update_time(self, time_pack):
-            D6.on()
+        def sync_time(self, time_pack):
             (year, month, day, week_day, hours, minutes, time_zone) = ustruct.unpack("6HB",time_pack)
             self.year = year
             self.month = self._month_values[month]
@@ -292,13 +247,10 @@ if __name__ == "__main__":
             self.time_zone = self._time_zone_values[time_zone]
             time_string = (self.week_day, self.day, self.month, self.year, self.hours, self.minutes, self.seconds, self.time_zone)
             self.display.update_date_and_time(time_string)
-            D6.off()
 
         def start_new_minute(self):
-            D5.on()
             self.seconds = 0
             print(f"{LOCAL_TIME_TAB}LocalTime: start_new_minute")
-            D5.off()
 
 
     class DCF_Display_stub():
@@ -306,20 +258,30 @@ if __name__ == "__main__":
             print("init DCF_Display_stub")
             
         def update_time_status(self, event, new_status, message=""):
+            if new_status == SYNC : D6.on()
+            else: D6.off()
+            D3.on()
             print(f"{TIME_STATUS_TAB}time_status\t-- ({event:^20s}) --> [{new_status:^20s}] : {message}")
+            D3.off()
    
         def update_signal_status(self, current_string, event, new_status):
+            D4.on()
             if current_string != None:
                 data = current_string[-1]
                 rank = len(current_string)-1
                 print(f"{SIGNAL_STATUS_TAB}signal_status\t-- ({event:^20s}) --> [{new_status:^20s}] : Data[{rank:0>2d}] = {data}")
             else:
                 print(f"{SIGNAL_STATUS_TAB}signal_status\t-- ({event:^20s}) --> [{new_status:^20s}] : No Data")
+            D4.off()
                 
         def update_date_and_time(self, time_string):
+            D5.on()
             week_day , day, month, year, hours, minutes, seconds, time_zone = time_string
             print(f"{LOCAL_TIME_TAB}LocalTime:\t{week_day} {day} {month} 20{year}\t{hours:0>2d}:{minutes:0>2d}:{seconds:0>2d}\tzone:{time_zone}")
-            
+            D5.off()
+            D7.on()
+            #refresh()
+            D7.off()
     
     
     
