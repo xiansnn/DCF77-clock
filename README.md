@@ -17,6 +17,6 @@ The figure below shows (in blue) the audio signal and (in yellow) the result of 
 ![DS1Z_QuickPrint3](https://user-images.githubusercontent.com/42316927/210848424-deed29cc-a519-40ac-b566-91c250a3a806.png)
 
 Several user interface have been used :
-- a simple TextUI, a textual interface relying on frames, or text box, that I've derived from the original driers from MakerFabs
+- a simple TextUI, a textual interface relying on frames, or text box, that I've derived from the original driers from MakerFabs from [here](https://github.com/xiansnn/RP2-micropython-libraries))
 - the nanoGUI from [here](https://github.com/peterhinch/micropython-nano-gui)
 - and finally the microGUI from [here](https://github.com/peterhinch/micropython-micro-gui)
