@@ -20,3 +20,5 @@ Several user interface have been used :
 - a simple TextUI, a textual interface relying on frames, or text box, that I've derived from the original driers from MakerFabs from [here](https://github.com/xiansnn/RP2-micropython-libraries))
 - the nanoGUI from [here](https://github.com/peterhinch/micropython-nano-gui)
 - and finally the microGUI from [here](https://github.com/peterhinch/micropython-micro-gui)
+
+TextUI and nanoGUI will probably no longer maintained. Only the microGUI will remain.
