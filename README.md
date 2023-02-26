@@ -21,4 +21,4 @@ Several user interface have been used :
 - the nanoGUI from [here](https://github.com/peterhinch/micropython-nano-gui)
 - and finally the microGUI from [here](https://github.com/peterhinch/micropython-micro-gui)
 
-TextUI and nanoGUI will probably no longer maintained. Only the microGUI will remain.
+TextUI and nanoGUI will probably no longer maintained. Only the [microGUI implementation](https://github.com/xiansnn/DCF77/tree/main/DCF77_microGUI) will remain.
