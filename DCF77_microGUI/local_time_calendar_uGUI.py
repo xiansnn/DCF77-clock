@@ -78,7 +78,7 @@ if __name__ == "__main__":
 # D3 = Probe(18) -
 # D4 = Probe(19) -
 # D5 = Probe(20) DCF_Display_stub.display_date_and_time
-# D6 = Probe(21) DCF_Decoder_stub._end_of_frame
+# D6 = Probe(21) -
 # D7 = Probe(26) -
 
 
