@@ -5,14 +5,14 @@ import micropython
 micropython.alloc_emergency_exception_buf(100)
 
 from debug_utility.pulses import *
-# D0 = Probe(26) # -
+# D0 = Probe(26) # -- time_trigger  
 # D1 = Probe(16) # DCF_Decoder._DCF_clock_IRQ_handler
 # D2 = Probe(17) # DCF_Decoder.frame_decoder
-# D3 = Probe(18) # DCF_Display_stub.update_time_status
-# D4 = Probe(19) # DCF_Display_stub.update_signal_status
-# D5 = Probe(20) # DCF_Display_stub.update_date_and_time
+# D3 = Probe(18) # DCF_Display_stub.display_time_status
+# D4 = Probe(19) # _StatusController.signal_received
+# D5 = Probe(20) # _StatusController.signal_timeout
 # D6 = Probe(21) # -- time_status == SYNC
-# D7 = Probe(27) # -- refresh(ssd)
+# D7 = Probe(27) # DCF_Display_stub.display_signal_status
 
 
 #SIGNAL
@@ -147,16 +147,9 @@ class DCF_Decoder():
 
     class _StatusController():
         def __init__(self):
-            # init_frame_decoding
-            self.time_state = SYNC_IN_PROGRESS
-            self.time_event  = TIME_INIT
-            # init signal status management
-            self.signal_state = SIGNAL_INIT
-            self.signal_event  = SIGNAL_INIT
-            self.last_received_frame_bit_rank = 0
-            self.last_received_frame_bit = "x"
-            self.error_message = ""
-
+            # init time and signal status management
+            self.set_time_status(TIME_INIT, SYNC_IN_PROGRESS, "")
+            self.set_signal_status(1,"x",SIGNAL_INIT,SIGNAL_INIT) 
             
         # Signal status management
         def set_signal_status(self, frame_size, data, new_event, new_status):
@@ -189,8 +182,10 @@ class DCF_Decoder():
             self.time_event = new_event
             self.time_state = new_status
             self.error_message = message
-            if new_status == SYNC : D6.on()
-            else: D6.off()
+            if new_status == SYNC :
+                D6.on()
+            else:
+                D6.off()
 
             # entering new state
         def out_of_sync(self):
@@ -230,12 +225,10 @@ if __name__ == "__main__":
                 
         def display_date_and_time(self, clock_update):
             LOCAL_TIME_TAB = const("\t\t\t\t\t\t\t\t\t\t\t\t")
-            D5.on()
             # raw_time_and_date : t[0]:year, t[1]:month, t[2]:mday, t[3]:hour, t[4]:minute, t[5]:second, t[6]:weekday, t[7]:time_zone
             year, month_num, mday, hour, minute, second, week_day_num, time_zone = clock_update
 #             print(f"{LOCAL_TIME_TAB}LocalTime: {clock_update}")
             print(f"{LOCAL_TIME_TAB}LocalTime: {self._week_day_values[week_day_num-1]:3s} {mday:02d} {self._month_values[month_num-1]:3s} {year:4d} {hour:02d}:{minute:002d}:{second:02d} UTC{time_zone:+01d}")
-            D5.off()
             
         def display_time_status(self, time_status):
             TIME_STATUS_TAB   = const("\t\t\t\t\t\t")
@@ -245,9 +238,9 @@ if __name__ == "__main__":
    
         def display_signal_status(self, signal_status):
             SIGNAL_STATUS_TAB = const("")
-            D4.on()
+            D7.on()
             print(f"{SIGNAL_STATUS_TAB}{signal_status}")
-            D4.off()
+            D7.off()
 
 
 ######################### init main tasks
