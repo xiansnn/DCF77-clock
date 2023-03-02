@@ -2,139 +2,79 @@ import hardware_setup
 from gui.core.ugui import Screen, ssd
 from gui.widgets import Label, LED, Dial, Pointer, Button, Textbox
 from gui.core.writer import CWriter
-
 # Font for CWriter
 import gui.fonts.arial10 as arial10
 import gui.fonts.arial35 as hours_font
 import gui.fonts.freesans20 as seconds_font
 import gui.fonts.freesans20 as date_font
-
 from gui.core.colors import *
-#-------------------------------
+#------------------------------------------------------------------------------
 # Now import other modules
 from cmath import rect, pi
 import uasyncio as asyncio
 import time
-from machine import Timer
 
-#-------------------------------
-
+#------------------------------------------------------------------------------
 # DEBUG logic analyser probe definitions
 from debug_utility.pulses import *
-# D0 = Probe(27) # LocalTimeCalendar._timer_IRQ
+# D0 = Probe(27) # one_second_coroutine or DHT11 pulses train
 # D1 = Probe(16) # DCF_Decoder._DCF_clock_IRQ_handler
 # D2 = Probe(17) # DCF_Decoder.frame_decoder
-# D3 = Probe(18) # DCF_Display_nanoGUI.update_time_status
-# D4 = Probe(19) # DCF_Display_nanoGUI.update_signal_status
-# D5 = Probe(20) # DCF_Display_nanoGUI.update_date_and_time
-# D6 = Probe(21) # _StatusController.time_status == SYNC
+# D3 = Probe(18) # DCF_clock_screen.aclock_screen
+# D4 = Probe(19) # _StatusController.signal_received
+# D5 = Probe(20) # _StatusController.signal_timeout
+# D6 = Probe(21) # time_status == SYNC
 # D7 = Probe(26) # -
 
 
-# import DCF modules
-TONE_GPIO = const(7) # the GPIO where DCF signal is received by MCU
-from DCF77.decoder_uGUIv1 import *
-from DCF77.local_time_calendar_uGUI import LocalTimeCalendar
+#------------------------------------------------------------------------------
+# triggering mechanism = one-second internal timer
+from machine import Timer
 
-sensor_temp = machine.ADC(4)
-conversion_factor = 3.3 / 65535
-def temperature():
-    reading = sensor_temp.read_u16() * conversion_factor
-    temperature = 27 - (reading - 0.706)/0.001721
-    return temperature
-
-# while True:
-#     reading = sensor_temp.read_u16() * conversion_factor
-#     
-#     # The temperature sensor measures the Vbe voltage of a biased bipolar diode, connected to the fifth ADC channel
-#     # Typically, Vbe = 0.706V at 27 degrees C, with a slope of -1.721mV (0.001721) per degree. 
-#     temperature = 27 - (reading - 0.706)/0.001721
-#     print(temperature)
-#     utime.sleep(2)
-
-
-class DCF_device():
-    def __init__(self):
-        self.local_time = LocalTimeCalendar()
-        self.dcf_decoder = DCF_Decoder(TONE_GPIO, self.local_time)
-        asyncio.create_task(self.dcf_decoder.DCF_signal_monitoring())
-        asyncio.create_task(self.dcf_decoder.frame_decoder())
-        asyncio.create_task(self.clock_update())
-        
-    async def clock_update(self):
-        while True:
-            D7.off()
-            await Screen.timer_elapsed.wait()
-            D7.on()
-            Screen.timer_elapsed.clear()
-            self.local_time.next_second()
-        
-    def get_local_time(self):
-#         localtime : t[0]:year, t[1]:month, t[2]:mday, t[3]:hour, t[4]:minute, t[5]:second, t[6]:weekday, t[7]:time_zone
-        return self.local_time.get_raw_time_and_date()
-    
-    def get_status(self):
-        ts = self.dcf_decoder.get_time_status()
-        time_state = ts[1]
-        if ts[1] == SYNC:
-            ts_text = "sync'd"
-        elif time_state == SYNC_IN_PROGRESS:
-            ts_text = "in progress"
-        elif time_state == SYNC_FAILED:
-            ts_text = "frame fail"
-        elif time_state == OUT_OF_SYNC:
-            ts_text = "out of sync"
-        else:
-            ts_text = "init"
-        ss = self.dcf_decoder.get_signal_status()
-        bit_rank = ss[0]
-        last_bit = ss[1]
-        return (ts_text,bit_rank,last_bit)
-#         time_status = [self._status_controller.time_event, self._status_controller.time_state, self._status_controller.error_message]
-#         signal_status [self._status_controller.last_received_frame_bit_rank, self._status_controller.last_received_frame_bit,
-#                 self._status_controller.signal_event, self._status_controller.signal_state]
-        
-    def get_time_status_rendering(self):
-        status = self.dcf_decoder.get_time_status()
-        state = status[1]
-        if state == SYNC:
-            blink = False
-            color = GREEN
-        elif state == SYNC_IN_PROGRESS:
-            blink = True
-            color = GREY
-        elif state == SYNC_FAILED:
-            blink = True
-            color = YELLOW
-        elif state == OUT_OF_SYNC:
-            blink = False
-            color = RED
-        else:
-            blink = True
-            color = WHITE
-        return (blink, color)
-
-
-dcf_clock = DCF_device()
-
-
-# triggering mechanism = 1-second internal timer
-
-def timer_IRQ(timer):
+def one_second_timer_IRQ(timer):
     irq_state = machine.disable_irq()
-    D0.on()
-    Screen.timer_elapsed.set()
-    D0.off()
+    asyncio.timer_elapsed.set()
     machine.enable_irq(irq_state)
 
-timer = Timer(mode=Timer.PERIODIC, freq=1, callback=timer_IRQ)
+timer = Timer(mode=Timer.PERIODIC, freq=1, callback=one_second_timer_IRQ)
 
-Screen.timer_elapsed = asyncio.Event() # evolution possible du Screen : prendre en compte ThreadSafeFlag
+asyncio.timer_elapsed = asyncio.Event() # evolution possible du Screen : prendre en compte ThreadSafeFlag
 
+# define coroutine that executes each second
+async def one_second_coroutine():
+    while True:
+        D0.off()
+        await asyncio.timer_elapsed.wait()
+        D0.on()
+        asyncio.timer_elapsed.clear()
+        dcf_clock.next_second()
+
+asyncio.create_task(one_second_coroutine())
+
+
+#------------------------------------------------------------------------------
+# import and setup temperature and humidity device
+from lib_pico.dht_v1 import DHT11device
+DHT_PIN_IN = const(9)
+PERIOD = const(50)
+dht11_device = DHT11device(DHT_PIN_IN, PERIOD)
+asyncio.create_task(dht11_device.async_measure())
+
+
+
+#------------------------------------------------------------------------------
+# import DCF modules
+from DCF77.DCF77_device import DCF_device
+TONE_GPIO = const(7) # the GPIO where DCF signal is received by MCU
+dcf_clock = DCF_device(TONE_GPIO)
+asyncio.create_task(dcf_clock.dcf_decoder.DCF_signal_monitoring())
+asyncio.create_task(dcf_clock.dcf_decoder.frame_decoder())
+
+
+#-------------------------- DCF77 GUI --------------------------------------
 # conversions table for Calendar
 days   = ('LUN', 'MAR', 'MER', 'JEU', 'VEN', 'SAM', 'DIM')
 months = ('JAN', 'FEV', 'MAR', 'AVR', 'MAY', 'JUN', 'JUL', 'AOU', 'SEP', 'OCT', 'NOV', 'DEC')
-
 
 def fwdbutton(wri, row, col, cls_screen, text='Next'):
     def fwd(button):
@@ -143,7 +83,29 @@ def fwdbutton(wri, row, col, cls_screen, text='Next'):
            height=10, width=35,
            fgcolor = YELLOW, bgcolor = BLACK,
            text = text, shape = RECTANGLE)
+    
+from DCF77.decoder_uGUIv1 import *   
+def time_status_rendering(dcf_device):
+    status = dcf_device.dcf_decoder.get_time_status()
+    state = status[1]
+    if state == SYNC:
+        blink = False
+        color = GREEN
+    elif state == SYNC_IN_PROGRESS:
+        blink = True
+        color = GREY
+    elif state == SYNC_FAILED:
+        blink = True
+        color = YELLOW
+    elif state == OUT_OF_SYNC:
+        blink = False
+        color = RED
+    else:
+        blink = True
+        color = WHITE
+    return (blink, color)
 
+#------------------------------------------------------------------------------
 class DCF_clock_screen(Screen):
     def __init__(self):
         super().__init__()
@@ -169,10 +131,13 @@ class DCF_clock_screen(Screen):
        
         self.dial = Dial(wri, 2, 2, height = 55, ticks = 12, fgcolor = GREEN, pip = GREEN)
         
-        col = 2 + self.dial.mcol + 3*gap
-        self.lbl_temperature = Label(wri_temp, 30, col, 30, **temp_colors)
-        col = self.lbl_temperature.mcol
-        self.lbl_unit = Label(wri, 30, col, "c", **temp_colors)
+        col1 = 2 + self.dial.mcol + 3*gap
+        self.lbl_temperature = Label(wri_temp, 20, col1, 30, **temp_colors)
+        col2 = self.lbl_temperature.mcol
+        self.lbl_temp_unit = Label(wri, 20, col2, "c", **temp_colors)
+        row = self.lbl_temperature.mrow
+        self.lbl_humidity = Label(wri_temp, row, col1, 30, **temp_colors)
+        self.lbl_hum_unit = Label(wri, row, col2, "%", **temp_colors)
         
         row = self.dial.mrow + gap
         self.lbl_date = Label(wri_date, row, 2, 124, **labels)
@@ -195,15 +160,16 @@ class DCF_clock_screen(Screen):
         hstart = 0 + 0.7j  # Pointer lengths. Will rotate relative to top.
         mstart = 0 + 1j
         sstart = 0 + 1j
-        
-        
-
+    
         while True:
-            temp = temperature()
-            self.lbl_temperature.value(f"{temp:3.0f}")
+            temperature  = dht11_device.get_temperature()
+            humidity = dht11_device.get_humidity()
+            self.lbl_temperature.value(f"{temperature:3.0f}")
+            self.lbl_humidity.value(f"{humidity:3.0f}")
             t = dcf_clock.get_local_time()
-            blink, color = dcf_clock.get_time_status_rendering()
-            # localtime : t[0]:year, t[1]:month, t[2]:mday, t[3]:hour, t[4]:minute, t[5]:second, t[6]:weekday, t[7]:time_zone
+            blink, color = time_status_rendering(dcf_clock)
+            # Format
+            ## localtime : t[0]:year, t[1]:month, t[2]:mday, t[3]:hour, t[4]:minute, t[5]:second, t[6]:weekday, t[7]:time_zone
             hrs.value(hstart * uv(-t[3] * pi/6 - t[4] * pi / 360), CYAN)
             mins.value(mstart * uv(-t[4] * pi/30), CYAN)
             secs.value(sstart * uv(-t[5] * pi/30), RED)
@@ -218,13 +184,12 @@ class DCF_clock_screen(Screen):
                 self.led_status(True)
                 self.led_status.color(color)
             D3.off()
-            await Screen.timer_elapsed.wait()
+            await asyncio.timer_elapsed.wait()
             D3.on()
-            Screen.timer_elapsed.clear()
-
- 
-
-
+            asyncio.timer_elapsed.clear()
+            
+            
+#------------------------------------------------------------------------------
 class DCF_detail_screen(Screen):
     def __init__(self):
         super().__init__()
@@ -243,8 +208,7 @@ class DCF_detail_screen(Screen):
         row = self.lbl_date.mrow + gap
         self.tb = Textbox(wri, row, 2, 120, 7) 
         self.reg_task(self.adetail_screen())
-
-        
+       
     async def adetail_screen(self):
         while True:
             t = dcf_clock.get_local_time()
@@ -253,14 +217,14 @@ class DCF_detail_screen(Screen):
             ts_symbol,bit_rank,last_bit = dcf_clock.get_status()
             if last_bit == None:
                 last_bit = "x"
-            self.tb.append(f"{ts_symbol:<11s} bit[{bit_rank:02d}]={last_bit:1s} s{t[5]:02d}")
+            self.tb.append(f"{ts_symbol:<11s} bit[{bit_rank:02d}]: {last_bit:1s} s{t[5]:02d}")
 
-            await Screen.timer_elapsed.wait()
-            Screen.timer_elapsed.clear()
+            await asyncio.timer_elapsed.wait()
+            asyncio.timer_elapsed.clear()
     
 
 
-#--------------------------------------------------
+#----------------- main program --------------------------
 
 if __name__ == "__main__":
     print('main program')
