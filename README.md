@@ -1,4 +1,4 @@
-# DCF77
+# DCF77-clock
  A project that decodes radio signal from DCF77 station.
 
 The project uses lib_pico and debug_utility from [xiansnn/RP2-micropython](https://github.com/xiansnn/RP2-micropython). It uses also various GUI. In its last version I've used microGUI from [here](https://github.com/peterhinch/micropython-micro-gui)
