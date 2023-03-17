@@ -3,3 +3,5 @@ test audio.py
 test FIR.py
 test_irq.py
 test_time_pulse.py
+DCF77_microGUI/draft_decoder_uGUIv2.py
+DCF77_microGUI/__decoder_uGUIv2.py
