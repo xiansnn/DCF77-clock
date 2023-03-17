@@ -11,7 +11,7 @@ class LocalTimeCalendar():
     def __init__(self):
         #init conversion tables
         self._time_zone_values = (0,2,1) #time_zone_code = 2 => CET => UTC+1, time_zone_code = 1 => CEST => UTC+2
-        
+        self.time_is_valid = False
         #init local time        
         self.year = 2000
         self.month_num = 1   # in (1 ... 12)
@@ -23,8 +23,8 @@ class LocalTimeCalendar():
         self.time_zone = 0   # UTC +{self.time_zone}
  
     def get_raw_time_and_date(self):
-     # raw_time_and_date : t[0]:year, t[1]:month, t[2]:mday, t[3]:hour, t[4]:minute, t[5]:second, t[6]:weekday, t[7]:time_zone
-        clock_update = (self.year, self.month_num, self.mday, self.hour, self.minute, self.second, self.week_day_num, self.time_zone)
+     # raw_time_and_date : t[0]:year, t[1]:month, t[2]:mday, t[3]:hour, t[4]:minute, t[5]:second, t[6]:weekday, t[7]:time_zone, t[8]:time_is_valid
+        clock_update = (self.year, self.month_num, self.mday, self.hour, self.minute, self.second, self.week_day_num, self.time_zone, self.time_is_valid)
         return clock_update
 
     def sync_time(self, DCF_time_pack):
@@ -42,6 +42,7 @@ class LocalTimeCalendar():
         self.minute = minutes
         self.second = 0
         self.time_zone = self._time_zone_values[time_zone_code]
+        self.time_is_valid = True
 
     def _next_hour(self):
         if self.hour==23:
@@ -93,8 +94,8 @@ if __name__ == "__main__":
             LOCAL_TIME_TAB = const("\t\t\t")
             D5.on()
             # raw_time_and_date : t[0]:year, t[1]:month, t[2]:mday, t[3]:hour, t[4]:minute, t[5]:second, t[6]:weekday, t[7]:time_zone
-            year, month_num, mday, hour, minute, second, week_day_num, time_zone = clock_update
-            print(f"{LOCAL_TIME_TAB}LocalTime: {self._week_day_values[week_day_num-1]:3s} {mday:02d} {self._month_values[month_num-1]:3s} {year:4d} {hour:02d}:{minute:002d}:{second:02d} UTC{time_zone:+01d}")
+            year, month_num, mday, hour, minute, second, week_day_num, time_zone, time_is_valid = clock_update
+            print(f"{LOCAL_TIME_TAB}LocalTime: {self._week_day_values[week_day_num-1]:3s} {mday:02d} {self._month_values[month_num-1]:3s} {year:4d} {hour:02d}:{minute:002d}:{second:02d} UTC{time_zone:+01d}\ttime valid:{time_is_valid}")
             D5.off()
 
             
