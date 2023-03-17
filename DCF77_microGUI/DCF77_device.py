@@ -34,7 +34,7 @@ class DCF_device():
         ss = self.dcf_decoder.get_signal_status()
         bit_rank = ss[0]
         last_bit = ss[1]
-        return (ts_text,bit_rank,last_bit)
+        return (time_state,ts_text,bit_rank,last_bit)
         # format
         ## time_status = [self._status_controller.time_event, self._status_controller.time_state, self._status_controller.error_message]
         ## signal_status  = [self._status_controller.last_received_frame_bit_rank, self._status_controller.last_received_frame_bit,
@@ -80,8 +80,3 @@ if __name__ == "__main__":
     scheduler = uasyncio.get_event_loop()
     scheduler.run_forever()
 
-
-    
-    
-
-    
