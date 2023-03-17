@@ -225,10 +225,10 @@ if __name__ == "__main__":
                 
         def display_date_and_time(self, clock_update):
             LOCAL_TIME_TAB = const("\t\t\t\t\t\t\t\t\t\t\t\t")
-            # raw_time_and_date : t[0]:year, t[1]:month, t[2]:mday, t[3]:hour, t[4]:minute, t[5]:second, t[6]:weekday, t[7]:time_zone
-            year, month_num, mday, hour, minute, second, week_day_num, time_zone = clock_update
+            # raw_time_and_date : t[0]:year, t[1]:month, t[2]:mday, t[3]:hour, t[4]:minute, t[5]:second, t[6]:weekday, t[7]:time_zone, t[8]:time_is_valid
+            year, month_num, mday, hour, minute, second, week_day_num, time_zone, time_is_valid = clock_update
 #             print(f"{LOCAL_TIME_TAB}LocalTime: {clock_update}")
-            print(f"{LOCAL_TIME_TAB}LocalTime: {self._week_day_values[week_day_num-1]:3s} {mday:02d} {self._month_values[month_num-1]:3s} {year:4d} {hour:02d}:{minute:002d}:{second:02d} UTC{time_zone:+01d}")
+            print(f"{LOCAL_TIME_TAB}LocalTime: {self._week_day_values[week_day_num-1]:3s} {mday:02d} {self._month_values[month_num-1]:3s} {year:4d} {hour:02d}:{minute:002d}:{second:02d} UTC{time_zone:+01d} time is valid:{time_is_valid}")
             
         def display_time_status(self, time_status):
             TIME_STATUS_TAB   = const("\t\t\t\t\t\t")
