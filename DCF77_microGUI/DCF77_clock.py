@@ -51,17 +51,6 @@ async def one_second_coroutine():
 
 asyncio.create_task(one_second_coroutine())
 
-
-#------------------------------------------------------------------------------
-# import and setup temperature and humidity device
-from lib_pico.dht_v1 import DHT11device
-DHT_PIN_IN = const(9)
-PERIOD = const(50)
-dht11_device = DHT11device(DHT_PIN_IN, PERIOD)
-asyncio.create_task(dht11_device.async_measure())
-
-
-
 #------------------------------------------------------------------------------
 # import DCF modules
 from DCF77.DCF77_device import DCF_device
@@ -70,6 +59,13 @@ dcf_clock = DCF_device(TONE_GPIO)
 asyncio.create_task(dcf_clock.dcf_decoder.DCF_signal_monitoring())
 asyncio.create_task(dcf_clock.dcf_decoder.frame_decoder())
 
+#------------------------------------------------------------------------------
+# import and setup temperature and humidity device
+from lib_pico.dht_v2 import DHT11device
+DHT_PIN_IN = const(9)
+PERIOD = const(60)
+dht11_device = DHT11device(DHT_PIN_IN, PERIOD, dcf_clock)
+asyncio.create_task(dht11_device.async_measure())
 
 #-------------------------- DCF77 GUI --------------------------------------
 # conversions table for Calendar
@@ -86,8 +82,8 @@ def fwdbutton(wri, row, col, cls_screen, text='Next'):
     
 from DCF77.decoder_uGUIv1 import *   
 def time_status_rendering(dcf_device):
-    status = dcf_device.dcf_decoder.get_time_status()
-    state = status[1]
+    status = dcf_device.get_status()
+    state = status[0]
     if state == SYNC:
         blink = False
         color = GREEN
@@ -132,11 +128,11 @@ class DCF_clock_screen(Screen):
         self.dial = Dial(wri, 2, 2, height = 55, ticks = 12, fgcolor = GREEN, pip = GREEN)
         
         col1 = 2 + self.dial.mcol + 3*gap
-        self.lbl_temperature = Label(wri_temp, 20, col1, 30, **temp_colors)
+        self.lbl_temperature = Label(wri_temp, 20, col1, 40, **temp_colors)
         col2 = self.lbl_temperature.mcol
         self.lbl_temp_unit = Label(wri, 20, col2, "c", **temp_colors)
         row = self.lbl_temperature.mrow
-        self.lbl_humidity = Label(wri_temp, row, col1, 30, **temp_colors)
+        self.lbl_humidity = Label(wri_temp, row, col1, 40, **temp_colors)
         self.lbl_hum_unit = Label(wri, row, col2, "%", **temp_colors)
         
         row = self.dial.mrow + gap
@@ -164,12 +160,12 @@ class DCF_clock_screen(Screen):
         while True:
             temperature  = dht11_device.get_temperature()
             humidity = dht11_device.get_humidity()
-            self.lbl_temperature.value(f"{temperature:3.0f}")
-            self.lbl_humidity.value(f"{humidity:3.0f}")
+            self.lbl_temperature.value(f"{temperature:3.1f}")
+            self.lbl_humidity.value(f"{humidity:3.1f}")
             t = dcf_clock.get_local_time()
             blink, color = time_status_rendering(dcf_clock)
             # Format
-            ## localtime : t[0]:year, t[1]:month, t[2]:mday, t[3]:hour, t[4]:minute, t[5]:second, t[6]:weekday, t[7]:time_zone
+            ## localtime : t[0]:year, t[1]:month, t[2]:mday, t[3]:hour, t[4]:minute, t[5]:second, t[6]:weekday, t[7]:time_zone, t[8]:time_is_valid
             hrs.value(hstart * uv(-t[3] * pi/6 - t[4] * pi / 360), CYAN)
             mins.value(mstart * uv(-t[4] * pi/30), CYAN)
             secs.value(sstart * uv(-t[5] * pi/30), RED)
@@ -214,10 +210,11 @@ class DCF_detail_screen(Screen):
             t = dcf_clock.get_local_time()
             # localtime : t[0]:year, t[1]:month, t[2]:mday, t[3]:hour, t[4]:minute, t[5]:second, t[6]:weekday, t[7]:time_zone
             self.lbl_date.value(f"{days[t[6]-1]} {t[2]} {months[t[1]-1]} {t[0]} {t[3]:02d}:{t[4]:02d}")
-            ts_symbol,bit_rank,last_bit = dcf_clock.get_status()
+            status,ts_symbol,bit_rank,last_bit = dcf_clock.get_status()
             if last_bit == None:
                 last_bit = "x"
-            self.tb.append(f"{ts_symbol:<11s} bit[{bit_rank:02d}]: {last_bit:1s} s{t[5]:02d}")
+#             self.tb.append(f"{ts_symbol:<11s} bit[{bit_rank:02d}]: {last_bit:1s} s{t[5]:02d}")
+            self.tb.append(f"{ts_symbol:>11s}   bit [{bit_rank:>02d}] :  {last_bit:1s} ")
 
             await asyncio.timer_elapsed.wait()
             asyncio.timer_elapsed.clear()
