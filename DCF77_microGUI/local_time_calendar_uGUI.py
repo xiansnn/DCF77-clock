@@ -23,7 +23,7 @@ class LocalTimeCalendar():
         self.time_zone = 0   # UTC +{self.time_zone}
  
     def get_raw_time_and_date(self):
-     # raw_time_and_date : t[0]:year, t[1]:month, t[2]:mday, t[3]:hour, t[4]:minute, t[5]:second, t[6]:weekday, t[7]:time_zone, t[8]:time_is_valid
+#FORMAT raw_time_and_date : t[0]:year, t[1]:month, t[2]:mday, t[3]:hour, t[4]:minute, t[5]:second, t[6]:weekday, t[7]:time_zone, t[8]:time_is_valid
         clock_update = (self.year, self.month_num, self.mday, self.hour, self.minute, self.second, self.week_day_num, self.time_zone, self.time_is_valid)
         return clock_update
 
